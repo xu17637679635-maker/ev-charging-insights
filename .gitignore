@@ -9,8 +9,10 @@ __pycache__/
 venv/
 env/
 ENV/
-# Locally vendored test dependencies (pytest etc.) installed with:
-#   pip install --target vendor pytest
+# Locally vendored dependencies installed with:
+#   python -m pip install --target vendor "numpy>=1.24" pandas matplotlib pytest
+# Not committed: ~200 MB of wheels, and trivially reproducible from the command
+# above. .vscode/settings.json injects it via PYTHONPATH.
 vendor/
 
 # ---- Test / coverage ----
@@ -21,7 +23,12 @@ htmlcov/
 coverage.xml
 
 # ---- Editors / OS ----
-.vscode/
+# .vscode/settings.json IS tracked on purpose: it pins the interpreter and
+# PYTHONPATH this project needs on a machine with several Python installs,
+# which is exactly the setup detail that is painful to rediscover later.
+# It contains no secrets.
+.vscode/*
+!.vscode/settings.json
 .idea/
 *.swp
 *~
