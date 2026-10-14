@@ -132,7 +132,7 @@ python -m src.main
 **环境要求**：Python 3.10+，依赖 `numpy`、`pandas`、`matplotlib`。
 
 ```bash
-# 1. 生成数据（约 40 秒）
+# 1. 生成数据（约 3 秒）
 python -m src.generate
 
 # 2. 看分析报告
@@ -141,7 +141,7 @@ python -m src.analyze
 # 3. 出图
 python -m src.plots
 
-# 或者一次跑完
+# 或者一次跑完（约 9 秒）
 python -m src.main
 ```
 
@@ -160,6 +160,25 @@ python scripts/run_tests.py         # 项目自带的 runner，无需 pytest
 ```
 
 26 个测试覆盖物理不变量、行为不变量和工程不变量（详见第 5 节）。
+
+### 本机开发环境备注
+
+开发时使用的解释器（VSCode 里选这个）：
+
+```
+C:\Users\徐鸿基\Desktop\神经网络\.venv3.11.1\Scripts\python.exe
+```
+
+该环境已含 `numpy` / `pandas` / `matplotlib` / `scipy` / `sklearn`。`pytest` 是通过
+`pip install --target vendor pytest` 装在项目内的 `vendor/` 目录（已 gitignore），
+运行时需要 `PYTHONPATH` 指向它：
+
+```powershell
+$env:PYTHONPATH = "$PWD\vendor"
+python -m pytest tests/ -q
+```
+
+如果不想折腾 pytest，直接 `python scripts/run_tests.py` 即可，两者结果一致。
 
 ---
 
