@@ -1,0 +1,17 @@
+# Normalise line endings on commit so the repository does not depend on which
+# machine checked it out. Windows editors default to CRLF; without this, every
+# file shows as modified after a fresh clone on Linux (or vice versa).
+* text=auto eol=lf
+
+# Binary assets must not be line-ending converted or diffed as text.
+*.png binary
+*.jpg binary
+*.pdf binary
+
+# Generated data is gitignored, but if someone stages it explicitly, treat it
+# as text so diffs stay readable.
+*.csv text
+*.json text
+
+# Keep the linguist language stats honest: don't count generated HTML/SVG.
+*.svg text

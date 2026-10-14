@@ -1,0 +1,42 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ---- Virtual environments / vendored deps ----
+.venv/
+venv/
+env/
+ENV/
+# Locally vendored test dependencies (pytest etc.) installed with:
+#   pip install --target vendor pytest
+vendor/
+
+# ---- Test / coverage ----
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Project outputs ----
+# Regenerate with: python -m src.generate
+# The raw CSVs are deliberately NOT committed: they are reproducible from a
+# fixed seed, and committing 500 KB of derived data makes the diff noisy.
+# figures/ IS committed, because the README embeds the charts.
+data/
+out/
+
+# ---- Scratch ----
+scratch/
+*.tmp
