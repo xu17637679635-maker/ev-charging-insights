@@ -161,38 +161,32 @@ python scripts/run_tests.py         # 项目自带的 runner，无需 pytest
 
 26 个测试覆盖物理不变量、行为不变量和工程不变量（详见第 5 节）。
 
-### 本机环境说明（依赖为什么在 `vendor/` 里）
+### 依赖安装
 
-开发这台机器上有 **7 个不同的 Python**，而 `PATH` 里默认的那个
-（`D:\python-3.11.1-amd64`）只有 `numpy` —— 直接跑会报
-`ModuleNotFoundError: No module named 'pandas'`。
-
-解决办法是把依赖装进**项目内的 `vendor/` 目录**，再由
-[`.vscode/settings.json`](.vscode/settings.json) 通过 `PYTHONPATH` 注入：
-
-```powershell
-# 重建 vendor/（约 200 MB，用清华镜像；官方源在国内很慢，不是不通）
-python -m pip install --target vendor `
-    -i https://pypi.tuna.tsinghua.edu.cn/simple `
-    "numpy>=1.24" pandas matplotlib pytest
+```bash
+pip install "numpy>=1.24" pandas matplotlib
+pip install pytest ipykernel        # 测试 + Jupyter 交互窗口（可选）
 ```
 
-这样做的好处是**不污染任何全局 Python 环境**，换台机器只要重跑这一条命令。
-`vendor/` 已 gitignore（体积大，且一条命令就能复现）。
+国内建议走镜像，官方源很慢：
 
-> 注：往全局 Python 装会失败，因为 pip 要往 `%APPDATA%\Python\Python311`
-> 写用户级脚本，在没有相应写权限时会被拒绝（`WinError 5`）。`--target` 绕开了这一点。
-
-**用 VSCode**：打开项目后新开一个终端就行，配置会自动生效。若终端是在改配置
-之前开的，关掉重开一个。验证：
-
-```powershell
-python -c "import pandas; print(pandas.__version__)"
+```bash
+pip install -i https://pypi.tuna.tsinghua.edu.cn/simple "numpy>=1.24" pandas matplotlib
 ```
 
-**不想用 `vendor/`** 也可以：任何装了 `pandas` + `matplotlib` 的解释器都能跑，
-用 VSCode 右下角切换即可 —— 例如
-`C:\Users\徐鸿基\Desktop\神经网络\.venv3.11.1\Scripts\python.exe` 就是现成的。
+不需要虚拟环境也能跑，但推荐建一个：
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install "numpy>=1.24" pandas matplotlib pytest
+```
+
+> **踩过的坑（值得记一下）**：这台机器上有 7 个 Python，`PATH` 里默认的那个
+> 当时只有 `numpy`，所以直接跑会报 `ModuleNotFoundError: No module named 'pandas'`。
+> 中途试过 `pip install --target vendor`（把依赖塞进项目内）作为临时方案，
+> 最终发现根源是**沙箱没有写工作区外目录的权限**（`WinError 5`），
+> 放开权限后正常装进默认解释器即可，`vendor/` 和 `.venv/` 都已清理。
 
 ---
 
@@ -325,8 +319,7 @@ charging-insights/
 ├── docs/
 │   └── charging_behavior_sources.md   参数来源汇编（408 行，全部带 URL）
 ├── .vscode/
-│   └── settings.json  钉住 PYTHONPATH -> vendor/（已提交，见第 3 节）
-├── vendor/            项目内依赖（已 gitignore，一条命令可重建）
+│   └── settings.json  编辑器配置（缩进、编码、搜索排除；无解释器硬编码）
 └── data/raw/          生成的数据（已 gitignore，可复现所以不提交）
 ```
 

@@ -1,25 +1,10 @@
 {
-    // 这个项目需要 numpy / pandas / matplotlib。
+    // 依赖装在 VSCode 默认解释器 D:\python-3.11.1-amd64 里
+    // （numpy / pandas / matplotlib / ipykernel / pytest），
+    // 所以这里不需要钉解释器路径，也不需要注入 PYTHONPATH。
     //
-    // 本机装了 7 个 Python，默认的 `python` 落在 D:\python-3.11.1-amd64，
-    // 它只有 numpy。所以依赖装在项目内的 vendor/ 目录里（已 gitignore），
-    // 靠下面的 PYTHONPATH 注入 —— 这样不污染任何全局环境，也不需要
-    // 记住哪个虚拟环境有 pandas。
-    //
-    // vendor/ 是这么建的（清华镜像，本机直连官方源很慢）：
-    //   python -m pip install --target vendor \
-    //       -i https://pypi.tuna.tsinghua.edu.cn/simple \
-    //       "numpy>=1.24" pandas matplotlib pytest
-    //
-    // 不想用 vendor/ 也行：任何装有 pandas + matplotlib 的解释器都能跑，
-    // 用右下角切一下即可。
-    "python.terminal.activateEnvironment": false,
+    // 想换解释器：右下角点击切换，任何装了 pandas + matplotlib 的都行。
     "python-envs.defaultEnvManager": "ms-python.python:system",
-
-    // 让新建的终端自动找到 vendor/ 里的依赖。
-    "terminal.integrated.env.windows": {
-        "PYTHONPATH": "${workspaceFolder}\\vendor"
-    },
 
     // 编辑器体验
     "files.encoding": "utf8",
@@ -29,9 +14,8 @@
         "editor.rulers": [88]
     },
 
-    // 生成的产物和第三方库不需要出现在搜索结果里
+    // 生成的产物不需要出现在搜索结果里
     "search.exclude": {
-        "**/vendor": true,
         "**/__pycache__": true,
         "**/data/raw": true,
         "**/.pytest_cache": true
