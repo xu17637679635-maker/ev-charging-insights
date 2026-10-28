@@ -12,10 +12,13 @@ Design notes
 * **The synthetic-data caveat is drawn on every figure**, not only in the
   README. A chart travels further than the text around it, and a chart that
   looks like real measurement without saying otherwise is misleading.
+* **Real-data figures get a different caveat**, naming the dataset instead. The
+  two must never be confused: one is a model, the other is measurement.
 
 Usage
 -----
-    python -m src.plots                     # writes figures/*.png
+    python -m src.plots                     # synthetic figures -> figures/
+    python -m src.plots --real              # real-data figures -> figures/
     python -m src.plots --dpi 200
 """
 
@@ -51,6 +54,8 @@ CJK_CANDIDATES = [
 ]
 
 CAVEAT = "合成数据（行为模型生成）· 非真实世界测量值"
+REAL_CAVEAT = ("真实观测数据 · UrbanEV 深圳公共充电 · "
+               "17,532 桩 · 2022-09 ~ 2023-02")
 
 
 def configure_fonts() -> str:
@@ -79,9 +84,9 @@ def configure_fonts() -> str:
     return chosen
 
 
-def _stamp(fig: plt.Figure) -> None:
-    """Put the synthetic-data caveat on the figure itself."""
-    fig.text(0.995, 0.005, CAVEAT, ha="right", va="bottom",
+def _stamp(fig: plt.Figure, text: str = CAVEAT) -> None:
+    """Put the provenance caveat on the figure itself."""
+    fig.text(0.995, 0.005, text, ha="right", va="bottom",
              fontsize=7.5, color="#888888")
 
 
@@ -396,6 +401,180 @@ def fig_daily_energy(daily: pd.DataFrame, sessions: pd.DataFrame, out: Path) -> 
 
 
 # ---------------------------------------------------------------------------
+# Real-data figures
+# ---------------------------------------------------------------------------
+def fig_synthetic_vs_real(sessions: pd.DataFrame, zone_hourly: pd.DataFrame,
+                          out: Path) -> Path:
+    """The headline chart: the simulated daily profile against the observed one.
+
+    Both curves are normalised to share-of-daily-energy, because the two systems
+    differ by orders of magnitude in absolute size and the *shape* is the claim
+    being tested.
+
+    The disagreement is the point. The simulation peaks in the evening because
+    it models private cars returning from work; Shenzhen peaks after midnight
+    because the public network mostly serves commercial fleets.
+    """
+    synth = sessions.groupby("hour")["energy_grid_kwh"].sum()
+    synth_pct = 100.0 * synth / synth.sum()
+
+    real = zone_hourly[zone_hourly["power_implausible"] == 0].groupby("hour")["volume_kwh"].sum()
+    real_pct = 100.0 * real / real.sum()
+
+    fig, ax = plt.subplots(figsize=(10.2, 5.0))
+    ax.plot(synth_pct.index, synth_pct.to_numpy(), lw=2.6, marker="o", ms=5,
+            color="#4C72B0", label="仿真（私家车通勤假设）")
+    ax.plot(real_pct.index, real_pct.to_numpy(), lw=2.6, marker="s", ms=5,
+            color="#C4453C", label="真实观测（深圳公共充电）")
+
+    # Annotations are placed with explicit offsets inside the axes: the two
+    # peaks are close together in x but far apart in y, so a fixed "above the
+    # point" rule collides with the title for the tall simulated curve.
+    peaks = ((synth_pct, "#4C72B0", "仿真峰值", (11.2, 13.4), (19, synth_pct.loc[19])),
+             (real_pct, "#C4453C", "真实峰值", (3.4, 8.6), (1, real_pct.loc[1])))
+    for series, colour, name, text_xy, peak_xy in peaks:
+        h = int(series.idxmax())
+        ax.scatter([h], [series.loc[h]], s=170, facecolors="none",
+                   edgecolors=colour, linewidths=2.2, zorder=5)
+        ax.annotate(f"{name} {h:02d}:00（{series.loc[h]:.1f}%）",
+                    xy=peak_xy, xytext=text_xy,
+                    fontsize=10, color=colour, fontweight="bold",
+                    arrowprops=dict(arrowstyle="->", color=colour, lw=1.4,
+                                    connectionstyle="arc3,rad=-0.2"))
+
+    ax.set_xlabel("一天中的小时")
+    ax.set_ylabel("占全天电量的比例（%）")
+    ax.set_title("仿真预测傍晚高峰，真实数据是凌晨高峰\n"
+                 "—— 同一个城市，两套完全不同的负荷时间结构",
+                 fontsize=12.5, fontweight="bold", pad=14)
+    ax.set_xticks(range(0, 24, 2))
+    ax.set_xlim(-0.5, 23.5)
+    ax.set_ylim(0, 17.5)
+    ax.legend(fontsize=10, loc="upper left")
+    ax.axvspan(0, 6, color="#C4453C", alpha=0.05, zorder=0)
+    # Placed in the empty band between the simulated curve (~1.5% by night) and
+    # the observed one (~6%), rather than at the bottom where the curves are.
+    ax.text(3.2, 3.1, "真实数据：夜间 00-06 点占 40%",
+            ha="center", fontsize=9.5, color="#C4453C")
+
+    fig.subplots_adjust(top=0.84, bottom=0.13, left=0.09, right=0.98)
+    # Both datasets appear here, so the caveat names both rather than claiming
+    # the whole figure is synthetic.
+    _stamp(fig, "曲线：仿真（模型） vs 真实观测（UrbanEV 深圳）· 两者刻度为占比")
+    return _save(fig, out / "07_synthetic_vs_real.png")
+
+
+def fig_real_daily(zone_hourly: pd.DataFrame, out: Path) -> Path:
+    """Observed load and observed utilisation on the same hourly axis.
+
+    Two different questions, deliberately paired: "how much energy" and "how
+    full is the network" are not the same curve, and the gap between them is
+    what a tariff or an expansion plan has to work with.
+    """
+    ok = zone_hourly[zone_hourly["power_implausible"] == 0]
+    days = max(1, ok["timestamp"].dt.normalize().nunique())
+
+    by_hour = ok.groupby("hour").agg(
+        volume=("volume_kwh", "sum"),
+        occ=("occupancy", "sum"),
+        piles=("n_piles", "sum"),
+    )
+    by_hour["kwh_per_day"] = by_hour["volume"] / days
+    by_hour["util"] = 100.0 * by_hour["occ"] / by_hour["piles"]
+
+    fig, ax = plt.subplots(figsize=(10.0, 4.8))
+    ax.bar(by_hour.index, by_hour["kwh_per_day"], width=0.72,
+           color="#C4453C", alpha=0.85, label="充电电量（kWh/日）")
+    ax.set_xlabel("一天中的小时")
+    ax.set_ylabel("充电电量（kWh/日）", color="#C4453C")
+    ax.tick_params(axis="y", colors="#C4453C")
+    ax.yaxis.set_major_formatter(FuncFormatter(_thousands))
+
+    ax2 = ax.twinx()
+    ax2.plot(by_hour.index, by_hour["util"], color="#222222", lw=2.4,
+             marker="o", ms=5, label="桩利用率（%）")
+    ax2.set_ylabel("桩利用率（%）", color="#222222")
+    ax2.set_ylim(0, max(by_hour["util"].max() * 1.35, 40))
+    ax2.grid(False)
+
+    peak = int(by_hour["kwh_per_day"].idxmax())
+    ax.set_title(f"深圳公共充电：电量峰值 {peak:02d}:00，日均 "
+                 f"{by_hour['kwh_per_day'].sum():,.0f} kWh",
+                 fontsize=12.5, fontweight="bold")
+    ax.set_xticks(range(0, 24, 2))
+    ax.set_xlim(-0.7, 23.7)
+
+    handles1, labels1 = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(handles1 + handles2, labels1 + labels2, fontsize=9.5, loc="upper right")
+
+    fig.tight_layout()
+    _stamp(fig, REAL_CAVEAT)
+    return _save(fig, out / "08_real_daily_profile.png")
+
+
+def fig_real_spatial(zone_hourly: pd.DataFrame, out: Path) -> Path:
+    """How concentrated demand is across zones -- the basis for siting decisions."""
+    by_zone = (zone_hourly.groupby("zone_id")["volume_kwh"].sum()
+               .sort_values(ascending=False))
+    cumulative = 100.0 * by_zone.cumsum() / by_zone.sum()
+    ranks = np.arange(1, len(by_zone) + 1)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.4, 4.5))
+
+    ax1.plot(ranks, cumulative.to_numpy(), lw=2.4, color="#C4453C")
+    for k, colour in ((10, "#333333"), (50, "#7F7F7F")):
+        ax1.axvline(k, color=colour, ls="--", lw=1.1)
+        ax1.scatter([k], [cumulative.iloc[k - 1]], s=60, color=colour, zorder=5)
+        ax1.annotate(f"前 {k} 个：{cumulative.iloc[k - 1]:.0f}%",
+                     xy=(k, cumulative.iloc[k - 1]),
+                     xytext=(k + 12, cumulative.iloc[k - 1] - 12),
+                     fontsize=9.5, color=colour)
+    ax1.set_xlabel("小区排名（按电量）")
+    ax1.set_ylabel("累计电量占比（%）")
+    ax1.set_title(f"{len(by_zone)} 个交通小区：电量高度集中",
+                  fontsize=11.5)
+    ax1.set_ylim(0, 102)
+    ax1.set_xlim(0, len(by_zone))
+
+    top = by_zone.head(20)
+    ax2.barh(np.arange(len(top)), (top / 1e6).to_numpy(), color="#4C72B0", alpha=0.9)
+    ax2.set_yticks(np.arange(len(top)), [f"Z{z}" for z in top.index], fontsize=7.5)
+    ax2.invert_yaxis()
+    ax2.set_xlabel("期内总电量（GWh）")
+    ax2.set_title("前 20 个小区", fontsize=11.5)
+
+    fig.suptitle("选址该看分布，不该看平均值", fontsize=13, fontweight="bold")
+    fig.tight_layout(rect=(0, 0.02, 1, 0.93))
+    _stamp(fig, REAL_CAVEAT)
+    return _save(fig, out / "09_real_spatial.png")
+
+
+def generate_real(data_dir: Path, synthetic_dir: Path,
+                  out_dir: Path, dpi: int = 110) -> list[Path]:
+    """Build every real-data figure that the available inputs allow."""
+    from . import real_data as rd
+
+    font = configure_fonts()
+    print(f"using CJK font: {font}")
+    plt.rcParams["figure.dpi"] = dpi
+
+    zone_hourly = rd.load_zone_hourly(data_dir)
+    paths: list[Path] = []
+
+    sessions_path = synthetic_dir / "sessions.csv"
+    if sessions_path.exists():
+        sessions, _stations, _daily = load(synthetic_dir)
+        paths.append(fig_synthetic_vs_real(sessions, zone_hourly, out_dir))
+    else:
+        print(f"  (skipping synthetic-vs-real: {sessions_path} not found)")
+
+    paths.append(fig_real_daily(zone_hourly, out_dir))
+    paths.append(fig_real_spatial(zone_hourly, out_dir))
+    return paths
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 def generate_all(data_dir: Path, out_dir: Path, dpi: int = 110) -> list[Path]:
@@ -418,11 +597,16 @@ def generate_all(data_dir: Path, out_dir: Path, dpi: int = 110) -> list[Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate charts")
     parser.add_argument("--data", type=Path, default=Path("data/raw"))
+    parser.add_argument("--real-data", type=Path, default=Path("data/real/urbanev"),
+                        help="UrbanEV directory (used with --real)")
     parser.add_argument("--out", type=Path, default=Path("figures"))
     parser.add_argument("--dpi", type=int, default=110)
+    parser.add_argument("--real", action="store_true",
+                        help="render figures from the real dataset instead")
     args = parser.parse_args(argv)
 
-    paths = generate_all(args.data, args.out, args.dpi)
+    paths = (generate_real(args.real_data, args.data, args.out, args.dpi)
+             if args.real else generate_all(args.data, args.out, args.dpi))
     for p in paths:
         print(f"  wrote {p}  ({p.stat().st_size / 1024:.0f} KB)")
     return 0
