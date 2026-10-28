@@ -41,10 +41,34 @@ def _load(path: Path):
 
 
 def _fixture_factory(module):
-    """Collect fixture providers, honouring a module-level cache for scope."""
+    """Collect fixture providers, honouring a module-level cache for scope.
+
+    Two pytest built-ins are emulated because the test suite uses them and they
+    are trivial to reproduce:
+
+    * ``tmp_path`` -- a fresh directory per test, deleted afterwards. Leaving it
+      cached across tests (as the module-scope cache otherwise would) would let
+      one test's files leak into the next and hide ordering bugs.
+    """
     cache: dict[str, object] = {}
+    tmp_dirs: list[Path] = []
+
+    def _cleanup() -> None:
+        import shutil
+
+        for path in tmp_dirs:
+            shutil.rmtree(path, ignore_errors=True)
+
+    import atexit
+    atexit.register(_cleanup)
 
     def resolve(name: str):
+        if name == "tmp_path":
+            import tempfile
+
+            path = Path(tempfile.mkdtemp(prefix="evtest-"))
+            tmp_dirs.append(path)
+            return path
         if name in cache:
             return cache[name]
         fn = getattr(module, name, None)

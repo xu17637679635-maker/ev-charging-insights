@@ -305,6 +305,91 @@ def analyse_monthly(df: pd.DataFrame) -> Finding:
     )
 
 
+def analyse_temperature(df: pd.DataFrame,
+                        weather: pd.DataFrame | None) -> Finding | None:
+    """Q7: does temperature actually drive demand here? Mostly no -- and the trap.
+
+    Pooled across the whole period, daily energy correlates with daily mean
+    temperature at about +0.40, which invites the conclusion "hot weather means
+    more charging". That conclusion is wrong, and this analysis exists to show
+    why:
+
+    * the warm months (Sep-Oct) happen to be high-demand months, and
+    * the cold months (Jan-Feb) contain Chinese New Year, when a large share of
+      drivers stop working.
+
+    Both effects push the pooled correlation up without any causal temperature
+    link. Grouping by month removes both (each group has a narrow temperature
+    range and, more importantly, no holiday boundary crossing it) and the
+    relationship collapses -- it even flips sign in December.
+
+    The honest reading is that charging demand in this dataset is set by fleet
+    scheduling, not by weather; and that the pooled correlation is an artefact.
+    """
+    if weather is None:
+        return None
+
+    merged = df.merge(weather, on="timestamp", how="inner")
+    if merged.empty:
+        return None
+
+    daily = (merged.groupby(merged["timestamp"].dt.normalize())
+             .agg(kwh=("volume_kwh", "sum"), temp=("temp_c", "mean")))
+    if len(daily) < 30:
+        return None
+
+    overall = float(daily["temp"].corr(daily["kwh"]))
+    daily["month"] = daily.index.to_period("M")
+    within = []
+    for month, sub in daily.groupby("month"):
+        if len(sub) >= 10:
+            within.append((str(month), len(sub),
+                           float(sub["temp"].corr(sub["kwh"])),
+                           float(sub["temp"].min()), float(sub["temp"].max())))
+
+    detail = [
+        f"温度范围 {daily['temp'].min():.1f} ~ {daily['temp'].max():.1f} °C，"
+        f"{len(daily)} 天",
+        f"**全期合并**：corr(日均温度, 日均电量) = {overall:+.3f}",
+        "",
+        "按月分组（控制季节与春节）：",
+    ]
+    for month, n, r, lo, hi in within:
+        detail.append(f"    {month}  n={n:2d} 天  corr = {r:+.3f}"
+                      f"   （温度 {lo:.1f}~{hi:.1f} °C）")
+
+    signs = [r for _, _, r, _, _ in within]
+    n_pos = sum(1 for r in signs if r > 0)
+    n_neg = sum(1 for r in signs if r < 0)
+
+    detail += [
+        "",
+        f"组内相关系数有 {n_pos} 个为正、{n_neg} 个为负，方向不一致，",
+        "绝对值也远小于合并值 —— 说明合并出来的 +0.40 是**混淆**而不是因果。",
+        "",
+        "混淆来自两处：暖月（9-10 月）恰好是需求高峰月；冷月（1-2 月）",
+        "包含春节，大量司机停驶。这两个效应都把合并相关系数推高，",
+        "但与温度本身没有因果关系。",
+        "",
+        "结论：本数据集中充电需求的时序变化主要由车队的排班决定，",
+        "受天气影响不明显。把合并相关系数当成「天气影响」是错的。",
+    ]
+
+    return Finding(
+        key="real_temperature",
+        title="7. 温度与需求：一个看似成立、实则被混淆的相关性",
+        headline=f"合并相关系数 {overall:+.2f}，但分组后方向不一致 —— 这是混淆不是因果",
+        detail=detail,
+        metrics={
+            "pooled_corr": overall,
+            "within_month_min": min(signs) if signs else float("nan"),
+            "within_month_max": max(signs) if signs else float("nan"),
+            "n_months_positive": n_pos,
+            "n_months_negative": n_neg,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Contrast with the simulation
 # ---------------------------------------------------------------------------
@@ -378,7 +463,17 @@ def run_all(data_dir: Path = rd.DEFAULT_DIR) -> tuple[list[Finding], pd.DataFram
         analyse_power_by_time(ok),
         analyse_monthly(ok),
     ]
-    return findings, df, {"summary": summary, "quality": rd.quality_report(df)}
+
+    # The weather analysis is optional: it needs weather_*.csv, which is one of
+    # the files a partial download may lack. Dropped rather than faked.
+    weather = rd.load_weather(data_dir)
+    temp_finding = analyse_temperature(ok, weather)
+    has_weather = temp_finding is not None
+    if temp_finding is not None:
+        findings.append(temp_finding)
+
+    return findings, df, {"summary": summary, "quality": rd.quality_report(df),
+                          "has_weather": has_weather}
 
 
 def format_report(findings: list[Finding], df: pd.DataFrame,

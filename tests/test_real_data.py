@@ -197,3 +197,53 @@ def test_real_dataset_ids_match_station_metadata() -> None:
     meta = rd.load_station_meta()
     df = rd.load_zone_hourly()
     assert set(df["zone_id"].unique()) == set(meta["zone_id"].unique())
+
+
+# ---------------------------------------------------------------------------
+# Weather
+# ---------------------------------------------------------------------------
+def test_temperature_column_is_read_from_the_shipped_header(tmp_path) -> None:
+    """The temperature column is named ``T``; only the doc file explains that.
+
+    Guessing from column names alone returns None here, which silently drops the
+    temperature analysis. Parsing the dataset's own header file is the robust
+    fix, and this test pins it.
+    """
+    header = tmp_path / "weather_header.txt"
+    header.write_text(
+        "Weather Data Table Header：\n"
+        "T：Air temperature (degree Celsius) at 2 metre height\n"
+        "U: Relative humidty (%)\n",
+        encoding="utf-8",
+    )
+    assert rd._temperature_code_from_header(header) == "T"
+
+    # ASCII colon variant, and a file without the line, must both behave.
+    header2 = tmp_path / "h2.txt"
+    header2.write_text("T: Air temperature (C)\n", encoding="utf-8")
+    assert rd._temperature_code_from_header(header2) == "T"
+
+    header3 = tmp_path / "h3.txt"
+    header3.write_text("U: humidity only\n", encoding="utf-8")
+    assert rd._temperature_code_from_header(header3) is None
+
+    assert rd._temperature_code_from_header(tmp_path / "missing.txt") is None
+
+
+def test_weather_loader_returns_none_without_a_weather_file(tmp_path) -> None:
+    """Absence must be reported as None so callers skip the analysis cleanly."""
+    assert rd.load_weather(tmp_path) is None
+
+
+def test_weather_loader_parses_the_real_file() -> None:
+    """Integration: the shipped weather file must yield a usable temperature."""
+    if not (rd.DEFAULT_DIR / "weather_central.csv").exists():
+        return
+    weather = rd.load_weather()
+    assert weather is not None
+    assert {"timestamp", "temp_c"} <= set(weather.columns)
+    assert len(weather) > 1000
+    # Shenzhen, Sep-Feb: a plausible band. A mis-parsed column (pressure,
+    # humidity) would immediately fall outside it.
+    assert -5 < weather["temp_c"].min() and weather["temp_c"].max() < 45
+    assert weather["timestamp"].is_monotonic_increasing

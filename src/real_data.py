@@ -251,20 +251,48 @@ def load_zone_hourly(data_dir: Path = DEFAULT_DIR) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Weather
 # ---------------------------------------------------------------------------
-# The upstream weather files use short Chinese column headers that are defined
-# in a separate header file. Those names are discovered at runtime rather than
-# hard-coded, because guessing a column name here would fail silently by
-# producing an all-NaN temperature series.
+# The upstream weather files use short column codes (``T``, ``U``, ``Td``...)
+# whose meanings are documented in a separate ``weather_header.txt``. Where that
+# file is available the code is read from it; guessing from column names alone
+# fails here because the temperature column is literally named ``T``.
 TEMPERATURE_CANDIDATES = ("气温", "温度", "temperature", "temp", "TEM", "Temperature")
+
+
+def _temperature_code_from_header(header_path: Path) -> str | None:
+    """Extract the column code for air temperature from the dataset's own docs.
+
+    ``weather_header.txt`` looks like::
+
+        Weather Data Table Header：
+        T：Air temperature (degree Celsius) at 2 metre height ...
+
+    Parsing it is more reliable than pattern-matching column names, and it means
+    a future re-release that renames columns is handled by the data itself
+    rather than by editing this module.
+    """
+    if not header_path.exists():
+        return None
+    for line in header_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "air temperature" not in line.lower():
+            continue
+        # Split on either a full-width or an ASCII colon.
+        for sep in ("：", ":"):
+            if sep in line:
+                code = line.split(sep, 1)[0].strip()
+                if code and len(code) <= 8:
+                    return code
+    return None
 
 
 def load_weather(data_dir: Path = DEFAULT_DIR) -> pd.DataFrame | None:
     """Hourly weather at the central station, or ``None`` if unavailable.
 
-    Returns a frame with ``timestamp`` and ``temp_c`` when it can find a
-    temperature column. Returning ``None`` (rather than an empty frame) lets
-    callers skip the temperature analysis explicitly instead of plotting
-    nothing and looking broken.
+    Returns a frame with ``timestamp`` and ``temp_c``. Returning ``None``
+    (rather than an empty frame) lets callers skip the temperature analysis
+    explicitly instead of plotting nothing and looking broken.
+
+    Also keeps relative humidity when present, because humidity changes how a
+    temperature feels -- and in Shenzhen the humid months overlap the warm ones.
     """
     candidates = [data_dir / "weather_central.csv", data_dir / "weather_airport.csv"]
     path = next((p for p in candidates if p.exists()), None)
@@ -277,15 +305,25 @@ def load_weather(data_dir: Path = DEFAULT_DIR) -> pd.DataFrame | None:
     if time_col is None:
         return None
 
-    temp_col = next((c for c in df.columns
-                     if any(k in str(c) for k in TEMPERATURE_CANDIDATES)), None)
+    # Prefer the documented code; fall back to name heuristics.
+    temp_col = _temperature_code_from_header(data_dir / "weather_header.txt")
+    if temp_col is None or temp_col not in df.columns:
+        temp_col = next((c for c in df.columns
+                         if any(k in str(c) for k in TEMPERATURE_CANDIDATES)
+                         or str(c).strip() in ("T", "temp", "TEMP")), None)
     if temp_col is None:
         return None
 
     out = pd.DataFrame({
-        "timestamp": pd.to_datetime(df[time_col], errors="coerce"),
+        "timestamp": pd.to_datetime(df[time_col], errors="coerce", format="mixed"),
         "temp_c": pd.to_numeric(df[temp_col], errors="coerce"),
-    }).dropna()
+    })
+    if "U" in df.columns:
+        out["humidity"] = pd.to_numeric(df["U"], errors="coerce")
+    if "nRAIN" in df.columns:
+        out["rain_code"] = pd.to_numeric(df["nRAIN"], errors="coerce")
+
+    out = out.dropna(subset=["timestamp", "temp_c"])
     if out.empty:
         return None
     return out.sort_values("timestamp").reset_index(drop=True)
